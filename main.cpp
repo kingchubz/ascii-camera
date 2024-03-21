@@ -1,11 +1,9 @@
 #include <windows.h>
 #include <stdio.h>
 #include <wchar.h>
+#include <iostream>
 
 #include "escapi.h"
-
-#define WND_WIDTH 170
-#define WND_HEIGHT 44
 
 union RGBint
 {
@@ -18,51 +16,56 @@ constexpr char tile[] =
     '.','-','+','$','#'
 };
 
+struct win_dimentions {
+    int w;
+    int h;
+};
+
+// Determines character depending on brightness of a pixel
 char getChar(RGBint clr,float gamma){
     char c = '#';
 
     float brightness;
 
-    brightness = clr.c[0] + clr.c[1] + clr.c[2];
+    brightness = (clr.c[0] + clr.c[1] + clr.c[2]) / 3;
     brightness /= 255;
     brightness += gamma;
 
     if(brightness <= 0.20)
         c = tile[0];
-        //c = tile[4];
     else if(brightness <= 0.4)
         c = tile[1];
-        //c = tile[3];
     else if(brightness <= 0.6)
         c = tile[2];
-        //c = tile[2];
     else if(brightness <= 0.8)
         c = tile[3];
-        //c = tile[1];
     else if(brightness <= 1)
         c = tile[4];
-        //c = tile[0];
 
     return c;
 }
 
+win_dimentions get_win_dimentions(HANDLE cHandle) {
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    win_dimentions w_dim;
 
+    GetConsoleScreenBufferInfo(cHandle, &csbi);
+
+    w_dim.w = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+    w_dim.h = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+
+    return w_dim;
+}
 
 int main()
 {
     int nCam = setupESCAPI();
 
-    if(nCam == 0)
+    if(nCam == 0) {
+        std::cout << "Could not initialize camera\n";
         return -1;
+    }
 
-    SimpleCapParams params;
-
-    params.mWidth = WND_WIDTH;
-    params.mHeight = WND_HEIGHT;
-    params.mTargetBuf = new int[WND_WIDTH*WND_HEIGHT];
-
-    if(initCapture(0, &params) == 0)
-        return -1;
 
     HANDLE cHandle = CreateConsoleScreenBuffer(
                               GENERIC_READ | GENERIC_WRITE,
@@ -74,7 +77,22 @@ int main()
 
     SetConsoleActiveScreenBuffer(cHandle);
 
-    char* screen = new char[WND_WIDTH*WND_HEIGHT];
+    const win_dimentions W_DIM = get_win_dimentions(cHandle);
+
+    SimpleCapParams params;
+
+    params.mWidth = W_DIM.w;
+    params.mHeight = W_DIM.h;
+    params.mTargetBuf = new int[W_DIM.w*W_DIM.h];
+
+    if(initCapture(0, &params) == 0){
+        std::cout << "Found camera, but could not initialize capture\n";
+        return -2;
+    }
+
+
+    // Console screen as array of characters
+    char* screen = new char[W_DIM.w*W_DIM.h];
 
     RGBint clr;
     float gamma = 0;
@@ -84,20 +102,20 @@ int main()
         doCapture(0);
         while(!isCaptureDone(0));
 
-        for(int i = 0; i < WND_WIDTH; i++)
+        for(int i = 0; i < W_DIM.w; i++)
         {
-            for(int j = 0; j < WND_HEIGHT; j++)
+            for(int j = 0; j < W_DIM.h; j++)
             {
-                clr.iPixel = params.mTargetBuf[i*WND_HEIGHT+j];
-                screen[i*WND_HEIGHT+j] = getChar(clr,gamma);
+                clr.iPixel = params.mTargetBuf[i*W_DIM.h+j];
+                screen[i*W_DIM.h+j] = getChar(clr,gamma);
             }
         }
 
-        screen[WND_WIDTH*WND_HEIGHT-1] = '\0';
+        screen[W_DIM.w*W_DIM.h-1] = '\0';
 
         DWORD lpNumberOfCharsWritten;
 
-        WriteConsoleOutputCharacter(cHandle,screen,WND_WIDTH*WND_HEIGHT,{0,0}, &lpNumberOfCharsWritten);
+        WriteConsoleOutputCharacter(cHandle,screen,W_DIM.w*W_DIM.h,{0,0}, &lpNumberOfCharsWritten);
 
         if(GetAsyncKeyState(VK_UP))
             gamma += 0.1;
